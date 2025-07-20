@@ -1,0 +1,189 @@
+import telebot
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+import random
+import json
+import os
+
+bot = telebot.TeleBot("7575355245:AAFYVI4nLAycyZ3tuTQk2Ib2g3Pme3eBdb8")  # ← мұнда өз токеніңді қой
+
+# 📁 Статистика файлы
+stats_file = 'users.json'
+if not os.path.exists(stats_file):
+    with open(stats_file, 'w') as f:
+        json.dump({}, f)
+
+def load_stats():
+    with open(stats_file, 'r') as f:
+        return json.load(f)
+
+def save_stats(data):
+    with open(stats_file, 'w') as f:
+        json.dump(data, f)
+
+def get_user(user_id):
+    stats = load_stats()
+    if str(user_id) not in stats:
+        stats[str(user_id)] = {
+            'clicks': 0,
+            'multiplier': 1,
+            'balance': 0,
+            'rps_win': 0,
+            'rps_lose': 0,
+            'xo_win': 0,
+            'xo_lose': 0,
+            'battleship_hit': 0,
+            'battleship_miss': 0,
+            'xo_field': [' '] * 9,
+            'xo_turn': 'X',
+            'battleship_ship': [random.randint(0, 4), random.randint(0, 4)],
+            'battleship_board': [['~'] * 5 for _ in range(5)],
+        }
+        save_stats(stats)
+    return stats[str(user_id)]
+
+def update_user(user_id, data):
+    stats = load_stats()
+    stats[str(user_id)].update(data)
+    save_stats(stats)
+
+# 🎮 Бас меню
+main_menu = ReplyKeyboardMarkup(resize_keyboard=True)
+main_menu.row('🎮 Кликер', '🪨 Су-е-фа')
+main_menu.row('❌ Крестики-нолики', '🚢 Морской бой')
+main_menu.row('🛒 Магазин', '📊 Статистика', '🔁 Ресет')
+
+@bot.message_handler(commands=['start'])
+def start(message):
+    get_user(message.from_user.id)
+    bot.send_message(message.chat.id, "Қош келдің! Таңда:", reply_markup=main_menu)
+
+# 🔁 Ресет
+@bot.message_handler(func=lambda m: m.text == '🔁 Ресет')
+def reset(message):
+    stats = load_stats()
+    stats.pop(str(message.from_user.id), None)
+    save_stats(stats)
+    bot.send_message(message.chat.id, "✅ Прогресс өшірілді. /start қайта бас")
+
+# 📊 Статистика
+@bot.message_handler(func=lambda m: m.text == '📊 Статистика')
+def show_stats(message):
+    data = get_user(message.from_user.id)
+    reply = (
+        f"🖱 Клик: {data['clicks']} (+{data['multiplier']})\n"
+        f"💰 Баланс: {data['balance']}\n"
+        f"🪨 Су-е-фа: ✅ {data['rps_win']} | ❌ {data['rps_lose']}\n"
+        f"❌ XO: ✅ {data['xo_win']} | ❌ {data['xo_lose']}\n"
+        f"🚢 Морской бой: 🎯 {data['battleship_hit']} | 💦 {data['battleship_miss']}"
+    )
+    bot.send_message(message.chat.id, reply)
+
+# 🎮 Кликер
+@bot.message_handler(func=lambda m: m.text == '🎮 Кликер')
+def clicker(message):
+    user = get_user(message.from_user.id)
+    user['clicks'] += user['multiplier']
+    user['balance'] += user['multiplier']
+    update_user(message.from_user.id, user)
+    bot.send_message(message.chat.id, f"+{user['multiplier']} клик!\nЖалпы: {user['clicks']}")
+
+# 🛒 Магазин
+@bot.message_handler(func=lambda m: m.text == '🛒 Магазин')
+def shop(message):
+    user = get_user(message.from_user.id)
+    cost = user['multiplier'] * 10
+    if user['balance'] >= cost:
+        user['balance'] -= cost
+        user['multiplier'] += 1
+        update_user(message.from_user.id, user)
+        bot.send_message(message.chat.id, f"🔼 Күшейткіш +1! Енді: +{user['multiplier']}")
+    else:
+        bot.send_message(message.chat.id, f"❌ Жеткіліксіз ақша. Құны: {cost}💰")
+
+# 🪨 Су-е-фа
+@bot.message_handler(func=lambda m: m.text == '🪨 Су-е-фа')
+def rps_game(message):
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row('Камень', 'Ножницы', 'Бумага')
+    markup.row('🔙 Артқа')
+    bot.send_message(message.chat.id, "Таңда:", reply_markup=markup)
+
+@bot.message_handler(func=lambda m: m.text in ['Камень', 'Ножницы', 'Бумага'])
+def rps_choice(message):
+    user = get_user(message.from_user.id)
+    user_choice = message.text
+    bot_choice = random.choice(['Камень', 'Ножницы', 'Бумага'])
+
+    win = {
+        'Камень': 'Ножницы',
+        'Ножницы': 'Бумага',
+        'Бумага': 'Камень'
+    }
+
+    if user_choice == bot_choice:
+        result = "🤝 Тең"
+    elif win[user_choice] == bot_choice:
+        result = "✅ Жеңдің!"
+        user['rps_win'] += 1
+    else:
+        result = "❌ Ұтылдың!"
+        user['rps_lose'] += 1
+
+    update_user(message.from_user.id, user)
+    bot.send_message(message.chat.id, f"Сен: {user_choice}\nБот: {bot_choice}\n{result}")
+
+# ❌ Крестики-нолики
+@bot.message_handler(func=lambda m: m.text == '❌ Крестики-нолики')
+def xo_start(message):
+    user = get_user(message.from_user.id)
+    user['xo_field'] = [' '] * 9
+    update_user(message.from_user.id, user)
+    xo_draw(message)
+
+def xo_draw(message):
+    user = get_user(message.from_user.id)
+    buttons = ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
+    for i in range(9):
+        text = user['xo_field'][i] if user['xo_field'][i] != ' ' else str(i+1)
+        buttons.insert(KeyboardButton(text))
+    buttons.add(KeyboardButton('🔙 Артқа'))
+    bot.send_message(message.chat.id, "Клетка таңда (1–9):", reply_markup=buttons)
+
+def xo_check_win(board, char):
+    wins = [(0,1,2), (3,4,5), (6,7,8), (0,3,6), (1,4,7), (2,5,8), (0,4,8), (2,4,6)]
+    return any(all(board[i] == char for i in line) for line in wins)
+
+@bot.message_handler(func=lambda m: m.text in [str(i) for i in range(1, 10)])
+def xo_play(message):
+    pos = int(message.text) - 1
+    user = get_user(message.from_user.id)
+
+    if user['xo_field'][pos] != ' ':
+        bot.send_message(message.chat.id, "⚠️ Бұл орын бос емес!")
+        return
+
+    user['xo_field'][pos] = 'X'
+    if xo_check_win(user['xo_field'], 'X'):
+        user['xo_win'] += 1
+        update_user(message.from_user.id, user)
+        bot.send_message(message.chat.id, "✅ Жеңдің! /❌ қайта ойна")
+        return
+
+    empty = [i for i, v in enumerate(user['xo_field']) if v == ' ']
+    if not empty:
+        bot.send_message(message.chat.id, "🤝 Тең!")
+        return
+
+    bot_move = random.choice(empty)
+    user['xo_field'][bot_move] = 'O'
+    if xo_check_win(user['xo_field'], 'O'):
+        user['xo_lose'] += 1
+        update_user(message.from_user.id, user)
+        bot.send_message(message.chat.id, "❌ Бот жеңді! /❌ қайта")
+        return
+
+    update_user(message.from_user.id, user)
+    xo_draw(message)
+
+# Ботты іске қосу
+bot.polling(non_stop=True)
